@@ -173,6 +173,7 @@ export function AnalysisWorkspace() {
         }
 
         // Parse the extracted JSON to check for is_financial flag
+        let isFinancialStatement = false;
         try {
           const jsonMatch = extractedData.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
@@ -182,6 +183,11 @@ export function AnalysisWorkspace() {
             if (parsed.is_financial === false) {
               setProcessing({ stage: 'error', progress: 0, message: '', error: 'This content does not appear to be financial in nature. FinSight is designed for financial analysis only. Please upload financial documents such as balance sheets, income statements, cash flow statements, or transactional data.' });
               return;
+            }
+
+            // Mark as financial statement if we have data array (extracted from image)
+            if (parsed.data && Array.isArray(parsed.data)) {
+              isFinancialStatement = true;
             }
           }
         } catch {
@@ -203,7 +209,8 @@ export function AnalysisWorkspace() {
           parsedExtraction.rows,
           parsedExtraction.headers,
           activeWorkspace.id,
-          file.name.replace(/\.[^.]+$/, '')
+          file.name.replace(/\.[^.]+$/, ''),
+          isFinancialStatement, // Pass flag to use financial statement analysis mode
         );
 
         await setAnalysisResult(activeWorkspace.id, result);

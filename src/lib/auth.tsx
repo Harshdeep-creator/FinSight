@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { supabase } from './supabase';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -7,17 +7,32 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   userId: string | null;
+  lastWorkspaceId: string | null;
+  setLastWorkspaceId: (id: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const ANON_USER_KEY = 'finsight_anon_user_id';
+const LAST_WORKSPACE_KEY = 'finsight_last_workspace_id';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [lastWorkspaceId, setLastWorkspaceIdState] = useState<string | null>(() => {
+    return localStorage.getItem(LAST_WORKSPACE_KEY);
+  });
+
+  const setLastWorkspaceId = useCallback((id: string | null) => {
+    if (id) {
+      localStorage.setItem(LAST_WORKSPACE_KEY, id);
+    } else {
+      localStorage.removeItem(LAST_WORKSPACE_KEY);
+    }
+    setLastWorkspaceIdState(id);
+  }, []);
 
   useEffect(() => {
     // Check for existing anonymous user ID in localStorage
@@ -75,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, userId }}>
+    <AuthContext.Provider value={{ user, session, loading, userId, lastWorkspaceId, setLastWorkspaceId }}>
       {children}
     </AuthContext.Provider>
   );

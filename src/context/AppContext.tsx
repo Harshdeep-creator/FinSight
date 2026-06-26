@@ -117,7 +117,7 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { userId } = useAuth();
+  const { userId, lastWorkspaceId, setLastWorkspaceId } = useAuth();
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId) || null;
@@ -147,6 +147,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           .eq('user_id', userId)
           .order('updated_at', { ascending: false });
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE, ...(data || [])] });
+
+        // Restore last active workspace if we have workspaces
+        const allWorkspaces = [DEMO_WORKSPACE, ...(data || [])];
+        if (lastWorkspaceId && allWorkspaces.some(w => w.id === lastWorkspaceId)) {
+          dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: lastWorkspaceId });
+          // Set mode based on workspace
+          const ws = allWorkspaces.find(w => w.id === lastWorkspaceId);
+          if (ws) dispatch({ type: 'SET_MODE', payload: ws.mode as AppMode });
+        }
       } catch {
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE] });
       }
@@ -154,6 +163,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     load();
   }, [userId]);
+
+  // Load messages and analysis when active workspace changes
+  useEffect(() => {
+    if (state.activeWorkspaceId && userId) {
+      loadMessages(state.activeWorkspaceId);
+      loadAnalysis(state.activeWorkspaceId);
+      setLastWorkspaceId(state.activeWorkspaceId);
+    }
+  }, [state.activeWorkspaceId]);
 
   const createWorkspace = useCallback(async (name: string, mode: AppMode): Promise<Workspace> => {
     if (!userId) throw new Error('User not initialized');
@@ -173,8 +191,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteWorkspace = useCallback(async (id: string) => {
     if (id === DEMO_WORKSPACE_ID) return;
     dispatch({ type: 'DELETE_WORKSPACE', payload: id });
-    try { await supabase.from('workspaces').delete().eq('id', id); } catch { /* */ }
-  }, []);
+    if (state.activeWorkspaceId === id) {
+      setLastWorkspaceId(null);
+    }
+    try {
+      await supabase.from('workspaces').delete().eq('id', id);
+      await supabase.from('messages').delete().eq('workspace_id', id);
+      await supabase.from('analysis_results').delete().eq('workspace_id', id);
+    } catch { /* */ }
+  }, [state.activeWorkspaceId, setLastWorkspaceId]);
 
   const renameWorkspace = useCallback(async (id: string, name: string) => {
     if (id === DEMO_WORKSPACE_ID) return;
@@ -186,11 +211,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [state.workspaces]);
 
   const loadMessages = useCallback(async (workspaceId: string) => {
-    if (state.messages[workspaceId]) return;
-    if (workspaceId === DEMO_WORKSPACE_ID) {
-      dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
-      return;
-    }
+    // Skip if already loaded or demo workspace
+    if (workspaceId === DEMO_WORKSPACE_ID) return;
     if (!userId) return;
 
     try {
@@ -204,7 +226,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
     }
-  }, [state.messages, userId]);
+  }, [userId]);
 
   const loadAnalysis = useCallback(async (workspaceId: string) => {
     if (workspaceId === DEMO_WORKSPACE_ID) return;
@@ -260,7 +282,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setActiveWorkspace = useCallback((id: string) => {
     dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: id });
-  }, []);
+    const ws = state.workspaces.find(w => w.id === id);
+    if (ws) dispatch({ type: 'SET_MODE', payload: ws.mode as AppMode });
+  }, [state.workspaces]);
 
   const setAnalysisResult = useCallback(async (workspaceId: string, result: AnalysisResult) => {
     if (!userId) throw new Error('User not initialized');
