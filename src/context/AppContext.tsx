@@ -112,13 +112,12 @@ interface AppContextValue {
   sendMessage: (workspaceId: string, content: string, role?: 'user' | 'assistant') => Promise<Message>;
   setActiveWorkspace: (id: string) => void;
   setAnalysisResult: (workspaceId: string, result: AnalysisResult) => Promise<void>;
-  clearAnalysis: (workspaceId: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { userId } = useAuth();
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId) || null;
@@ -135,9 +134,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     configureAI({ geminiKey: DEFAULT_GEMINI_KEY || undefined, groqKey: DEFAULT_GROQ_KEY || undefined });
   }, []);
 
-  // Load workspaces when user changes
+  // Load workspaces when userId is available
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
 
     const load = async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
@@ -145,7 +144,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const { data } = await supabase
           .from('workspaces')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .order('updated_at', { ascending: false });
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE, ...(data || [])] });
       } catch {
@@ -154,11 +153,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: false });
     };
     load();
-  }, [user]);
+  }, [userId]);
 
   const createWorkspace = useCallback(async (name: string, mode: AppMode): Promise<Workspace> => {
-    if (!user) throw new Error('Not authenticated');
-    const ws = { name, mode, is_demo: false, dataset_name: null, dataset_rows: null, last_analysis_at: null, user_id: user.id };
+    if (!userId) throw new Error('User not initialized');
+    const ws = { name, mode, is_demo: false, dataset_name: null, dataset_rows: null, last_analysis_at: null, user_id: userId };
     try {
       const { data, error } = await supabase.from('workspaces').insert(ws).select().single();
       if (error) throw error;
@@ -169,7 +168,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'ADD_WORKSPACE', payload: fallback });
       return fallback;
     }
-  }, [user]);
+  }, [userId]);
 
   const deleteWorkspace = useCallback(async (id: string) => {
     if (id === DEMO_WORKSPACE_ID) return;
@@ -192,31 +191,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
       return;
     }
-    if (!user) return;
+    if (!userId) return;
 
     try {
       const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: true });
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: data || [] } });
     } catch {
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
     }
-  }, [state.messages, user]);
+  }, [state.messages, userId]);
 
   const loadAnalysis = useCallback(async (workspaceId: string) => {
-    if (workspaceId === DEMO_WORKSPACE_ID) return; // Demo always has pre-loaded analysis
-    if (!user) return;
+    if (workspaceId === DEMO_WORKSPACE_ID) return;
+    if (!userId) return;
 
     try {
       const { data } = await supabase
         .from('analysis_results')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -241,11 +240,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // No analysis found
     }
-  }, [user]);
+  }, [userId]);
 
   const sendMessage = useCallback(async (workspaceId: string, content: string, role: 'user' | 'assistant' = 'user'): Promise<Message> => {
-    if (!user) throw new Error('Not authenticated');
-    const msg = { workspace_id: workspaceId, role, content, metadata: {}, user_id: user.id };
+    if (!userId) throw new Error('User not initialized');
+    const msg = { workspace_id: workspaceId, role, content, metadata: {}, user_id: userId };
     const optimisticId = `opt-${Date.now()}`;
     const optimistic: Message = { ...msg, id: optimisticId, created_at: new Date().toISOString() };
     dispatch({ type: 'ADD_MESSAGE', payload: { workspaceId, message: optimistic } });
@@ -257,14 +256,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch { /* */ }
     return optimistic;
-  }, [user]);
+  }, [userId]);
 
   const setActiveWorkspace = useCallback((id: string) => {
     dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: id });
   }, []);
 
   const setAnalysisResult = useCallback(async (workspaceId: string, result: AnalysisResult) => {
-    if (!user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('User not initialized');
     dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result } });
 
     const ws = state.workspaces.find(w => w.id === workspaceId);
@@ -288,7 +287,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           await supabase.from('analysis_results').insert({
             workspace_id: workspaceId,
-            user_id: user.id,
+            user_id: userId,
             version: result.version,
             health_score: result.health_score,
             key_findings: result.key_findings,
@@ -302,18 +301,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } catch { /* */ }
       }
     }
-  }, [state.workspaces, user]);
-
-  const clearAnalysis = useCallback((workspaceId: string) => {
-    // Remove analysis from state by setting it to null
-    dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result: null as unknown as AnalysisResult } });
-  }, []);
+  }, [state.workspaces, userId]);
 
   return (
     <AppContext.Provider value={{
       state, dispatch, activeWorkspace, activeMessages, activeAnalysis,
       createWorkspace, deleteWorkspace, renameWorkspace, loadMessages, loadAnalysis,
-      sendMessage, setActiveWorkspace, setAnalysisResult, clearAnalysis,
+      sendMessage, setActiveWorkspace, setAnalysisResult,
     }}>
       {children}
     </AppContext.Provider>

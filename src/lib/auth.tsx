@@ -6,58 +6,76 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signOut: () => Promise<void>;
+  userId: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+const ANON_USER_KEY = 'finsight_anon_user_id';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // Check for existing anonymous user ID in localStorage
+    const storedAnonId = localStorage.getItem(ANON_USER_KEY);
+
+    if (storedAnonId) {
+      setUserId(storedAnonId);
       setLoading(false);
-    });
+      return;
+    }
+
+    // Create anonymous auth session automatically
+    const initAnonAuth = async () => {
+      try {
+        // Try to sign in anonymously
+        const { data, error } = await supabase.auth.signInAnonymously();
+
+        if (error) {
+          // If anonymous auth fails, generate a local UUID
+          const localId = `local-${crypto.randomUUID()}`;
+          localStorage.setItem(ANON_USER_KEY, localId);
+          setUserId(localId);
+        } else {
+          // Store the anonymous user ID
+          const anonId = data.user?.id || `anon-${crypto.randomUUID()}`;
+          localStorage.setItem(ANON_USER_KEY, anonId);
+          setUserId(anonId);
+          setUser(data.user);
+          setSession(data.session);
+        }
+      } catch {
+        // Fallback to local UUID
+        const localId = `local-${crypto.randomUUID()}`;
+        localStorage.setItem(ANON_USER_KEY, localId);
+        setUserId(localId);
+      }
+      setLoading(false);
+    };
+
+    initAnonAuth();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+      if (session?.user) {
+        setUser(session.user);
+        setSession(session);
+        const anonId = session.user.id;
+        localStorage.setItem(ANON_USER_KEY, anonId);
+        setUserId(anonId);
+      }
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    return { error: error as Error | null };
-  };
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error: error as Error | null };
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-  };
-
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, userId }}>
       {children}
     </AuthContext.Provider>
   );

@@ -3,31 +3,25 @@ import { Landing } from './pages/Landing';
 import { FinApp } from './pages/FinApp';
 import { AuthProvider, useAuth } from './lib/auth';
 import { AppProvider } from './context/AppContext';
-import { AuthScreen } from './components/auth/AuthScreen';
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
   const [appStarted, setAppStarted] = useState(false);
   const [goToDemo, setGoToDemo] = useState(false);
 
-  // Show loading state
+  // Show loading state while initializing anonymous auth
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center" style={{ background: 'var(--c-bg)' }}>
         <div className="flex items-center gap-3">
           <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--c-text-1)', borderTopColor: 'transparent' }} />
-          <span className="text-sm" style={{ color: 'var(--c-text-2)' }}>Loading...</span>
+          <span className="text-sm" style={{ color: 'var(--c-text-2)' }}>Initializing...</span>
         </div>
       </div>
     );
   }
 
-  // Require authentication
-  if (!user) {
-    return <AuthScreen />;
-  }
-
-  // Show landing or app
+  // Show landing or app directly (no sign in required)
   if (!appStarted) {
     return (
       <Landing
