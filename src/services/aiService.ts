@@ -33,11 +33,18 @@ ABSOLUTE RULES:
 6. Always explain the financial significance of findings — not just the numbers.
 7. Remember previous conversation turns and maintain context.`;
 
-const VISION_EXTRACT_PROMPT = `Extract all financial data from this image. The image contains financial statements or documents.
+const VISION_EXTRACT_PROMPT = `Analyze this image/document and extract financial data if present.
 
-Return a JSON object with:
+If the image does NOT contain financial content (like a random photo, meme, drawing, screenshot of a game, etc), return:
 {
-  "document_type": "balance sheet|income statement|cash flow|other",
+  "is_financial": false,
+  "reason": "brief explanation why this is not financial"
+}
+
+If the image DOES contain financial content (balance sheet, income statement, cash flow, financial report, transaction list, invoice, receipt with totals, etc), return:
+{
+  "is_financial": true,
+  "document_type": "balance sheet|income statement|cash flow|invoice|receipt|transaction list|other",
   "company_name": "company name if visible",
   "period": "reporting period if visible",
   "currency": "USD|GBP|EUR etc",
@@ -47,7 +54,9 @@ Return a JSON object with:
   "summary": "brief description of the document"
 }
 
-Extract ALL numbers visible. Use numeric values only (no currency symbols in value field). If a value is negative, use a negative number.`;
+Extract ALL numbers visible. Use numeric values only (no currency symbols in value field). If a value is negative, use a negative number.
+
+Financial content includes: balance sheets, income statements, cash flow statements, invoices, receipts with financial totals, transaction records, financial reports, expense reports, tax documents, investment statements, financial dashboards.`;
 
 function buildAnalysisContext(analysis: AnalysisResult): string {
   const { health_score, metrics, key_findings, anomalies, raw_stats } = analysis;
@@ -234,6 +243,82 @@ export async function extractDataFromImage(imageBase64: string, mimeType = 'imag
   }
 
   throw new Error('No AI API key configured. Please check Settings.');
+}
+
+// Check if text content is financial in nature
+export async function checkFinancialContent(text: string): Promise<boolean> {
+  const lowerText = text.toLowerCase();
+
+  // Quick keyword check first
+  const financialKeywords = [
+    'revenue', 'sales', 'income', 'profit', 'loss', 'expense', 'cost',
+    'balance', 'asset', 'liability', 'equity', 'cash', 'flow',
+    'price', 'amount', 'total', 'subtotal', 'tax', 'discount',
+    'invoice', 'receipt', 'payment', 'transaction', 'order',
+    'customer', 'quantity', 'qty', 'unit', 'date', 'period',
+    'gross', 'net', 'margin', 'ebitda', 'earnings',
+    'debt', 'credit', 'debit', 'budget', 'forecast'
+  ];
+
+  const hasFinancialKeywords = financialKeywords.some(kw => lowerText.includes(kw));
+
+  // Check for numbers with currency or percentage patterns
+  const hasNumbers = /\d+/.test(text);
+  const hasCurrencyOrPct = /[\$£€¥%]/.test(text) || /\d+\.?\d*\s*(dollars|pounds|euros|percent|usd|gbp|eur)/i.test(text);
+
+  // Has table-like structure
+  const hasTableStructure = text.includes(',') || text.includes('\t') || text.split('\n').length > 5;
+
+  // Basic heuristic: if has financial keywords and numbers, likely financial
+  if (hasFinancialKeywords && hasNumbers) {
+    return true;
+  }
+
+  // If has currency/percentages with table structure, likely financial
+  if (hasCurrencyOrPct && hasTableStructure) {
+    return true;
+  }
+
+  // If has tabular data with numbers, could be financial
+  if (hasTableStructure && hasNumbers && hasFinancialKeywords) {
+    return true;
+  }
+
+  // Use AI to check if unclear
+  if ((config.geminiKey || config.groqKey) && hasNumbers && hasTableStructure) {
+    try {
+      const prompt = `Is this text content financial in nature? Financial content includes: financial statements, transaction records, invoices, receipts, sales data, expense reports, budget data, etc. Reply with ONLY "true" or "false".
+
+Text preview (first 500 chars):
+${text.slice(0, 500)}`;
+
+      if (config.geminiKey) {
+        try {
+          const result = await callGemini(
+            'You are a classifier that determines if content is financial. Reply ONLY with "true" or "false".',
+            [{ role: 'user', content: prompt }],
+            ''
+          );
+          return result.toLowerCase().includes('true');
+        } catch { /* fall through */ }
+      }
+
+      if (config.groqKey) {
+        try {
+          const result = await callGroq(
+            'You are a classifier that determines if content is financial. Reply ONLY with "true" or "false".',
+            [{ role: 'user', content: prompt }],
+            ''
+          );
+          return result.toLowerCase().includes('true');
+        } catch { /* fall through */ }
+      }
+    } catch {
+      // Default to allowing if we can't check
+    }
+  }
+
+  return false;
 }
 
 function generateFallbackResponse(question: string, mode: 'assistant' | 'analysis', analysis?: AnalysisResult): string {

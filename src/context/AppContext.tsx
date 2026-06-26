@@ -3,6 +3,7 @@ import type { Workspace, Message, AnalysisResult, ProcessingState, AppMode } fro
 import { supabase } from '../lib/supabase';
 import { DEMO_ANALYSIS_RESULT, DEMO_WORKSPACE_ID, DEMO_WORKSPACE_NAME } from '../data/demoData';
 import { configureAI } from '../services/aiService';
+import { useAuth } from '../lib/auth';
 
 const DEFAULT_GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY || '';
 const DEFAULT_GROQ_KEY   = import.meta.env.VITE_GROQ_KEY   || '';
@@ -107,14 +108,17 @@ interface AppContextValue {
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   loadMessages: (workspaceId: string) => Promise<void>;
+  loadAnalysis: (workspaceId: string) => Promise<void>;
   sendMessage: (workspaceId: string, content: string, role?: 'user' | 'assistant') => Promise<Message>;
   setActiveWorkspace: (id: string) => void;
   setAnalysisResult: (workspaceId: string, result: AnalysisResult) => Promise<void>;
+  clearAnalysis: (workspaceId: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId) || null;
@@ -131,10 +135,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     configureAI({ geminiKey: DEFAULT_GEMINI_KEY || undefined, groqKey: DEFAULT_GROQ_KEY || undefined });
   }, []);
 
+  // Load workspaces when user changes
   useEffect(() => {
+    if (!user) return;
+
     const load = async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        const { data } = await supabase.from('workspaces').select('*').order('updated_at', { ascending: false });
+        const { data } = await supabase
+          .from('workspaces')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false });
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE, ...(data || [])] });
       } catch {
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE] });
@@ -142,10 +154,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: false });
     };
     load();
-  }, []);
+  }, [user]);
 
   const createWorkspace = useCallback(async (name: string, mode: AppMode): Promise<Workspace> => {
-    const ws = { name, mode, is_demo: false, dataset_name: null, dataset_rows: null, last_analysis_at: null };
+    if (!user) throw new Error('Not authenticated');
+    const ws = { name, mode, is_demo: false, dataset_name: null, dataset_rows: null, last_analysis_at: null, user_id: user.id };
     try {
       const { data, error } = await supabase.from('workspaces').insert(ws).select().single();
       if (error) throw error;
@@ -156,7 +169,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'ADD_WORKSPACE', payload: fallback });
       return fallback;
     }
-  }, []);
+  }, [user]);
 
   const deleteWorkspace = useCallback(async (id: string) => {
     if (id === DEMO_WORKSPACE_ID) return;
@@ -175,16 +188,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadMessages = useCallback(async (workspaceId: string) => {
     if (state.messages[workspaceId]) return;
+    if (workspaceId === DEMO_WORKSPACE_ID) {
+      dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
+      return;
+    }
+    if (!user) return;
+
     try {
-      const { data } = await supabase.from('messages').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: true });
+      const { data } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: data || [] } });
     } catch {
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
     }
-  }, [state.messages]);
+  }, [state.messages, user]);
+
+  const loadAnalysis = useCallback(async (workspaceId: string) => {
+    if (workspaceId === DEMO_WORKSPACE_ID) return; // Demo always has pre-loaded analysis
+    if (!user) return;
+
+    try {
+      const { data } = await supabase
+        .from('analysis_results')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (data) {
+        const result: AnalysisResult = {
+          id: data.id,
+          workspace_id: data.workspace_id,
+          version: data.version,
+          health_score: data.health_score,
+          key_findings: data.key_findings,
+          metrics: data.metrics,
+          forecasts: data.forecasts,
+          anomalies: data.anomalies,
+          audit_trail: data.audit_trail,
+          report_summary: data.report_summary || '',
+          raw_stats: data.raw_stats,
+          created_at: data.created_at,
+        };
+        dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result } });
+      }
+    } catch {
+      // No analysis found
+    }
+  }, [user]);
 
   const sendMessage = useCallback(async (workspaceId: string, content: string, role: 'user' | 'assistant' = 'user'): Promise<Message> => {
-    const msg = { workspace_id: workspaceId, role, content, metadata: {} };
+    if (!user) throw new Error('Not authenticated');
+    const msg = { workspace_id: workspaceId, role, content, metadata: {}, user_id: user.id };
     const optimisticId = `opt-${Date.now()}`;
     const optimistic: Message = { ...msg, id: optimisticId, created_at: new Date().toISOString() };
     dispatch({ type: 'ADD_MESSAGE', payload: { workspaceId, message: optimistic } });
@@ -196,33 +257,64 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch { /* */ }
     return optimistic;
-  }, []);
+  }, [user]);
 
   const setActiveWorkspace = useCallback((id: string) => {
     dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: id });
   }, []);
 
   const setAnalysisResult = useCallback(async (workspaceId: string, result: AnalysisResult) => {
+    if (!user) throw new Error('Not authenticated');
     dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result } });
+
     const ws = state.workspaces.find(w => w.id === workspaceId);
     if (ws) {
-      const updated = { ...ws, last_analysis_at: new Date().toISOString(), dataset_name: result.audit_trail.dataset_name, dataset_rows: result.raw_stats.total_transactions, updated_at: new Date().toISOString() };
+      const updated = {
+        ...ws,
+        last_analysis_at: new Date().toISOString(),
+        dataset_name: result.audit_trail.dataset_name,
+        dataset_rows: result.raw_stats.total_transactions,
+        updated_at: new Date().toISOString(),
+      };
       dispatch({ type: 'UPDATE_WORKSPACE', payload: updated });
-      try {
-        await supabase.from('workspaces').update({ last_analysis_at: updated.last_analysis_at, dataset_name: updated.dataset_name, dataset_rows: updated.dataset_rows }).eq('id', workspaceId);
-        await supabase.from('analysis_results').insert({
-          workspace_id: workspaceId, version: result.version,
-          health_score: result.health_score, key_findings: result.key_findings,
-          metrics: result.metrics, forecasts: result.forecasts,
-          anomalies: result.anomalies, audit_trail: result.audit_trail,
-          report_summary: result.report_summary, raw_stats: result.raw_stats,
-        });
-      } catch { /* */ }
+
+      if (workspaceId !== DEMO_WORKSPACE_ID) {
+        try {
+          await supabase.from('workspaces').update({
+            last_analysis_at: updated.last_analysis_at,
+            dataset_name: updated.dataset_name,
+            dataset_rows: updated.dataset_rows,
+          }).eq('id', workspaceId);
+
+          await supabase.from('analysis_results').insert({
+            workspace_id: workspaceId,
+            user_id: user.id,
+            version: result.version,
+            health_score: result.health_score,
+            key_findings: result.key_findings,
+            metrics: result.metrics,
+            forecasts: result.forecasts,
+            anomalies: result.anomalies,
+            audit_trail: result.audit_trail,
+            report_summary: result.report_summary,
+            raw_stats: result.raw_stats,
+          });
+        } catch { /* */ }
+      }
     }
-  }, [state.workspaces]);
+  }, [state.workspaces, user]);
+
+  const clearAnalysis = useCallback((workspaceId: string) => {
+    // Remove analysis from state by setting it to null
+    dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result: null as unknown as AnalysisResult } });
+  }, []);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, activeWorkspace, activeMessages, activeAnalysis, createWorkspace, deleteWorkspace, renameWorkspace, loadMessages, sendMessage, setActiveWorkspace, setAnalysisResult }}>
+    <AppContext.Provider value={{
+      state, dispatch, activeWorkspace, activeMessages, activeAnalysis,
+      createWorkspace, deleteWorkspace, renameWorkspace, loadMessages, loadAnalysis,
+      sendMessage, setActiveWorkspace, setAnalysisResult, clearAnalysis,
+    }}>
       {children}
     </AppContext.Provider>
   );

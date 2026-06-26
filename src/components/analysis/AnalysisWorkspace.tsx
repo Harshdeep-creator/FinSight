@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Database, RefreshCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { UploadArea } from './UploadArea';
@@ -14,7 +14,7 @@ import { ReportPanel } from './ReportPanel';
 import { ChatInterface } from '../chat/ChatInterface';
 import { readFileAsText, parseCSV, detectRetailSchema } from '../../services/csvParser';
 import { runFinancialAnalysis } from '../../services/financialCalculations';
-import { extractDataFromImage } from '../../services/aiService';
+import { extractDataFromImage, checkFinancialContent } from '../../services/aiService';
 import type { ProcessingState } from '../../types';
 import { DEMO_ANALYSIS_RESULT } from '../../data/demoData';
 
@@ -114,13 +114,20 @@ const STAGE_SEQUENCE: Array<{ stage: ProcessingState['stage']; delay: number; me
 ];
 
 export function AnalysisWorkspace() {
-  const { activeWorkspace, activeAnalysis, setAnalysisResult, dispatch } = useApp();
+  const { activeWorkspace, activeAnalysis, setAnalysisResult, loadAnalysis, dispatch } = useApp();
   const [tab, setTab] = useState<AnalysisTab>('health');
   const [processing, setProcessing] = useState<ProcessingState>({ stage: 'idle', progress: 0, message: '' });
 
   const isDemo = activeWorkspace?.is_demo;
   const analysis = isDemo ? DEMO_ANALYSIS_RESULT : activeAnalysis;
   const hasAnalysis = !!analysis;
+
+  // Load persisted analysis when workspace changes
+  useEffect(() => {
+    if (activeWorkspace?.id && !activeWorkspace.is_demo) {
+      loadAnalysis(activeWorkspace.id);
+    }
+  }, [activeWorkspace?.id, activeWorkspace?.is_demo, loadAnalysis]);
 
   const handleFileSelected = useCallback(async (file: File) => {
     if (!activeWorkspace) return;
@@ -133,14 +140,16 @@ export function AnalysisWorkspace() {
     };
 
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const isImage = ['png', 'jpg', 'jpeg', 'webp'].includes(ext);
+    const isImage = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext);
     const isPdf = ext === 'pdf';
+    const isText = ['txt', 'md', 'text'].includes(ext);
 
     const mimeMap: Record<string, string> = {
       png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-      webp: 'image/webp', pdf: 'application/pdf',
+      webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+      pdf: 'application/pdf',
     };
-    const mimeType = mimeMap[ext] || file.type || 'image/jpeg';
+    const mimeType = mimeMap[ext] || file.type || 'application/octet-stream';
 
     try {
       // Handle image/PDF files with AI extraction
@@ -152,8 +161,9 @@ export function AnalysisWorkspace() {
           new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
         );
 
-        setProcessing({ stage: 'processing', progress: 30, message: 'Extracting financial data using AI vision...' });
+        setProcessing({ stage: 'processing', progress: 20, message: 'Checking if content is financial...' });
 
+        // Check if the content is financial
         let extractedData: string;
         try {
           extractedData = await extractDataFromImage(base64, mimeType);
@@ -162,12 +172,28 @@ export function AnalysisWorkspace() {
           return;
         }
 
+        // Parse the extracted JSON to check for is_financial flag
+        try {
+          const jsonMatch = extractedData.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+
+            // Check if AI determined this is not financial content
+            if (parsed.is_financial === false) {
+              setProcessing({ stage: 'error', progress: 0, message: '', error: 'This content does not appear to be financial in nature. FinSight is designed for financial analysis only. Please upload financial documents such as balance sheets, income statements, cash flow statements, or transactional data.' });
+              return;
+            }
+          }
+        } catch {
+          // If we can't parse JSON, continue with extraction attempt
+        }
+
         setProcessing({ stage: 'calculating', progress: 50, message: 'Parsing extracted financial data...' });
 
         // Parse the extracted JSON and create synthetic CSV rows
         const parsedExtraction = parseExtractedFinancialData(extractedData);
         if (!parsedExtraction || parsedExtraction.rows.length === 0) {
-          setProcessing({ stage: 'error', progress: 0, message: '', error: 'Could not extract financial data from the image. Please ensure the image contains clear financial information (balance sheet, income statement, etc.).' });
+          setProcessing({ stage: 'error', progress: 0, message: '', error: 'Could not extract financial data from this file. The content may not be financial in nature, or the data format was not recognized. Please upload clear financial documents like balance sheets, income statements, or transaction records.' });
           return;
         }
 
@@ -186,6 +212,31 @@ export function AnalysisWorkspace() {
         return;
       }
 
+      // Handle text files - check if financial
+      if (isText) {
+        const text = await file.text();
+        const isFinancial = await checkFinancialContent(text);
+
+        if (!isFinancial) {
+          setProcessing({ stage: 'error', progress: 0, message: '', error: 'This text content does not appear to be financial in nature. FinSight is designed for financial analysis only. Please upload financial documents or data.' });
+          return;
+        }
+
+        // Try to parse as CSV
+        const parsed = parseCSV(text);
+        if (parsed.rows.length === 0) {
+          setProcessing({ stage: 'error', progress: 0, message: '', error: 'Could not parse text file as financial data. Please ensure it contains structured data or upload a different format.' });
+          return;
+        }
+
+        await runStages();
+        const result = runFinancialAnalysis(parsed.rows, parsed.headers, activeWorkspace.id, file.name.replace(/\.[^.]+$/, ''));
+        await setAnalysisResult(activeWorkspace.id, result);
+        setProcessing({ stage: 'complete', progress: 100, message: '' });
+        setTab('health');
+        return;
+      }
+
       // Handle CSV/Excel files
       const stagePromise = runStages();
 
@@ -198,10 +249,13 @@ export function AnalysisWorkspace() {
       }
 
       if (!detectRetailSchema(parsed.headers)) {
-        const hasPrice = parsed.headers.some(h => h.toLowerCase().includes('price') || h.toLowerCase().includes('amount') || h.toLowerCase().includes('value') || h.toLowerCase().includes('revenue'));
-        const hasQty = parsed.headers.some(h => h.toLowerCase().includes('quantity') || h.toLowerCase().includes('qty') || h.toLowerCase().includes('units'));
-        if (!hasPrice && !hasQty) {
-          setProcessing({ stage: 'error', progress: 0, message: '', error: `Unable to detect financial columns in this file. Expected: Price/Amount/Revenue and Quantity columns. Found: ${parsed.headers.join(', ')}` });
+        const hasPrice = parsed.headers.some(h => h.toLowerCase().includes('price') || h.toLowerCase().includes('amount') || h.toLowerCase().includes('value') || h.toLowerCase().includes('revenue') || h.toLowerCase().includes('sales') || h.toLowerCase().includes('cost'));
+        const hasQty = parsed.headers.some(h => h.toLowerCase().includes('quantity') || h.toLowerCase().includes('qty') || h.toLowerCase().includes('units') || h.toLowerCase().includes('count'));
+        const hasDate = parsed.headers.some(h => h.toLowerCase().includes('date') || h.toLowerCase().includes('time'));
+        const hasFinancial = hasPrice || hasQty || hasDate;
+
+        if (!hasFinancial) {
+          setProcessing({ stage: 'error', progress: 0, message: '', error: `This file does not appear to contain financial data. Expected columns like: Price, Amount, Revenue, Quantity, Date. Found: ${parsed.headers.slice(0, 5).join(', ')}${parsed.headers.length > 5 ? '...' : ''}. Please upload a file with financial/transactional data.` });
           return;
         }
       }
@@ -225,6 +279,12 @@ export function AnalysisWorkspace() {
     dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: 'demo-workspace' });
     dispatch({ type: 'SET_MODE', payload: 'analysis' });
   }, [dispatch]);
+
+  const handleReanalyze = useCallback(() => {
+    // Clear the current analysis to show upload UI
+    dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId: activeWorkspace?.id || '', result: null as unknown as any } });
+    setProcessing({ stage: 'idle', progress: 0, message: '' });
+  }, [activeWorkspace?.id, dispatch]);
 
   if (!activeWorkspace) {
     return (
@@ -296,7 +356,7 @@ export function AnalysisWorkspace() {
         <div className="flex items-center gap-2">
           {!isDemo && (
             <button
-              onClick={() => setProcessing({ stage: 'idle', progress: 0, message: '' })}
+              onClick={handleReanalyze}
               className="btn-ghost text-xs py-1 px-2"
             >
               <RefreshCcw size={12} />

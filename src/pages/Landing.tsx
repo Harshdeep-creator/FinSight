@@ -49,16 +49,74 @@ export function Landing({ onEnter, onViewDemo }: Props) {
   const text2     = dark ? '#a8a8a8' : '#525252';
   const text3     = dark ? '#717171' : '#737373';
   const border    = dark ? '#333333' : '#d9d9d9';
-  const cardBg    = dark ? '#181818' : '#ffffff';
-  const cardBorder = dark ? '#333333' : '#d9d9d9';
   const navBg     = dark ? 'rgba(10,10,10,0.92)' : 'rgba(255,255,255,0.92)';
   const stripBg   = dark ? '#141414' : '#f7f7f7';
   const pipeBg    = dark ? '#111111' : '#1a1a1a';
-  const pipeCardBg = dark ? '#1e1e1e' : '#2a2a2a';
   const pipeCardBorder = dark ? '#2e2e2e' : '#383838';
   const numColor  = dark ? '#888888' : '#a0a0a0';
   const primaryBg = dark ? '#f5f5f5' : '#0a0a0a';
   const primaryText = dark ? '#0a0a0a' : '#f5f5f5';
+  const glowBorder = dark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.2)';
+
+  // 3D glowy card style
+  const glowCardStyle = {
+    borderRadius: '16px',
+    border: `1px solid ${glowBorder}`,
+    padding: '20px',
+    background: dark
+      ? 'linear-gradient(145deg, rgba(30, 30, 30, 0.9), rgba(20, 20, 20, 0.95))'
+      : 'linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(245, 245, 245, 0.9))',
+    boxShadow: dark
+      ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(59, 130, 246, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+      : '0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
+    transform: 'translateZ(0)',
+    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+  };
+
+  // 3D metric card style
+  const metricCardStyle = {
+    borderRadius: '14px',
+    border: `1px solid ${glowBorder}`,
+    padding: '18px',
+    background: dark
+      ? 'linear-gradient(145deg, rgba(25, 25, 25, 0.95), rgba(15, 15, 15, 0.98))'
+      : 'linear-gradient(145deg, rgba(255, 255, 255, 1), rgba(248, 248, 248, 0.95))',
+    boxShadow: dark
+      ? '0 4px 20px rgba(0, 0, 0, 0.3), 0 0 40px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03)'
+      : '0 4px 20px rgba(0, 0, 0, 0.06), 0 0 40px rgba(59, 130, 246, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+    transition: 'transform 0.25s ease, box-shadow 0.25s ease',
+  };
+
+  // Pipeline card style
+  const pipelineCardStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    borderRadius: '10px',
+    padding: '12px 14px',
+    border: `1px solid ${pipeCardBorder}`,
+    background: dark
+      ? 'linear-gradient(145deg, rgba(35, 35, 35, 0.9), rgba(25, 25, 25, 0.95))'
+      : 'linear-gradient(145deg, rgba(45, 45, 45, 0.95), rgba(35, 35, 35, 0.98))',
+    boxShadow: dark
+      ? '0 2px 12px rgba(0, 0, 0, 0.3), 0 0 20px rgba(59, 130, 246, 0.05)'
+      : '0 2px 12px rgba(0, 0, 0, 0.2), 0 0 20px rgba(59, 130, 246, 0.03)',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+  };
+
+  // How it works step style
+  const stepStyle = {
+    borderRadius: '14px',
+    padding: '24px',
+    background: dark
+      ? 'linear-gradient(145deg, rgba(25, 25, 25, 0.9), rgba(18, 18, 18, 0.95))'
+      : 'linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(248, 248, 248, 0.9))',
+    border: `1px solid ${glowBorder}`,
+    boxShadow: dark
+      ? '0 4px 24px rgba(0, 0, 0, 0.25), 0 0 30px rgba(59, 130, 246, 0.06)'
+      : '0 4px 24px rgba(0, 0, 0, 0.05), 0 0 30px rgba(59, 130, 246, 0.04)',
+    transition: 'transform 0.25s ease, box-shadow 0.25s ease',
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: bg, color: text1, transition: 'opacity 0.28s', opacity: leaving ? 0 : 1 }}>
@@ -118,17 +176,32 @@ export function Landing({ onEnter, onViewDemo }: Props) {
       </section>
 
       {/* Demo Metrics Strip */}
-      <section style={{ borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, padding: '40px 24px', background: stripBg }}>
+      <section style={{ borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, padding: '48px 24px', background: stripBg }}>
         <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', textAlign: 'center', marginBottom: '24px', color: text3 }}>
+          <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', textAlign: 'center', marginBottom: '28px', color: text3 }}>
             Live analysis — UCI Online Retail II dataset
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            {METRICS.map(m => (
-              <div key={m.label} style={{ borderRadius: '12px', border: `1px solid ${cardBorder}`, padding: '16px', background: cardBg }}>
-                <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px', color: text3 }}>{m.label}</p>
-                <p style={{ fontSize: '22px', fontWeight: 600, color: text1, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{m.value}</p>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '18px' }}>
+            {METRICS.map((m) => (
+              <div
+                key={m.label}
+                style={metricCardStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 60px rgba(59, 130, 246, 0.12)'
+                    : '0 8px 32px rgba(0, 0, 0, 0.1), 0 0 60px rgba(59, 130, 246, 0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateZ(0)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 4px 20px rgba(0, 0, 0, 0.3), 0 0 40px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03)'
+                    : '0 4px 20px rgba(0, 0, 0, 0.06), 0 0 40px rgba(59, 130, 246, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9)';
+                }}
+              >
+                <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px', color: text3 }}>{m.label}</p>
+                <p style={{ fontSize: '24px', fontWeight: 600, color: text1, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{m.value}</p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
                   <span style={{ fontSize: '11px', color: text3 }}>{m.sub}</span>
                   <span style={{ fontSize: '11px', fontWeight: 700, color: m.color }}>{m.status}</span>
                 </div>
@@ -151,18 +224,33 @@ export function Landing({ onEnter, onViewDemo }: Props) {
       </section>
 
       {/* How it works */}
-      <section style={{ padding: '64px 24px', borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, background: stripBg }}>
+      <section style={{ padding: '80px 24px', borderTop: `1px solid ${border}`, borderBottom: `1px solid ${border}`, background: stripBg }}>
         <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '10px', color: text1 }}>The system analyzes first. The AI explains second.</h2>
-            <p style={{ fontSize: '14px', color: text2 }}>Backend intelligence generates all metrics before the AI layer provides humanized interpretation.</p>
+          <div style={{ textAlign: 'center', marginBottom: '56px' }}>
+            <h2 style={{ fontSize: '28px', fontWeight: 600, marginBottom: '12px', color: text1 }}>The system analyzes first. The AI explains second.</h2>
+            <p style={{ fontSize: '15px', color: text2, maxWidth: '600px', margin: '0 auto' }}>Backend intelligence generates all metrics before the AI layer provides humanized interpretation.</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '32px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px' }}>
             {HOW_IT_WORKS.map(({ n, l, d }) => (
-              <div key={n}>
-                <span style={{ fontSize: '40px', fontWeight: 800, color: numColor, display: 'block', lineHeight: 1, marginBottom: '10px', letterSpacing: '-0.02em' }}>{n}</span>
-                <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px', color: text1 }}>{l}</h3>
-                <p style={{ fontSize: '12px', lineHeight: 1.65, color: text2 }}>{d}</p>
+              <div
+                key={n}
+                style={stepStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-6px)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 12px 40px rgba(0, 0, 0, 0.3), 0 0 50px rgba(59, 130, 246, 0.1)'
+                    : '0 12px 40px rgba(0, 0, 0, 0.08), 0 0 50px rgba(59, 130, 246, 0.06)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateZ(0)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 4px 24px rgba(0, 0, 0, 0.25), 0 0 30px rgba(59, 130, 246, 0.06)'
+                    : '0 4px 24px rgba(0, 0, 0, 0.05), 0 0 30px rgba(59, 130, 246, 0.04)';
+                }}
+              >
+                <span style={{ fontSize: '44px', fontWeight: 800, color: numColor, display: 'block', lineHeight: 1, marginBottom: '14px', letterSpacing: '-0.02em' }}>{n}</span>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '10px', color: text1 }}>{l}</h3>
+                <p style={{ fontSize: '13px', lineHeight: 1.65, color: text2 }}>{d}</p>
               </div>
             ))}
           </div>
@@ -172,20 +260,35 @@ export function Landing({ onEnter, onViewDemo }: Props) {
       {/* Features */}
       <section style={{ padding: '80px 24px' }}>
         <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '10px', color: text1 }}>Everything you need to understand a business</h2>
-            <p style={{ fontSize: '14px', color: text2 }}>Designed specifically for financial intelligence</p>
+          <div style={{ textAlign: 'center', marginBottom: '56px' }}>
+            <h2 style={{ fontSize: '28px', fontWeight: 600, marginBottom: '12px', color: text1 }}>Everything you need to understand a business</h2>
+            <p style={{ fontSize: '15px', color: text2 }}>Designed specifically for financial intelligence</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
             {FEATURES.map(f => {
               const Icon = f.icon;
               return (
-                <div key={f.title} style={{ borderRadius: '12px', border: `1px solid ${cardBorder}`, padding: '20px', background: cardBg }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px', background: dark ? '#2a2a2a' : '#f0f0f0' }}>
-                    <Icon size={16} style={{ color: text2 }} />
+                <div
+                  key={f.title}
+                  style={glowCardStyle}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-8px)';
+                    e.currentTarget.style.boxShadow = dark
+                      ? '0 16px 48px rgba(0, 0, 0, 0.5), 0 0 60px rgba(59, 130, 246, 0.15)'
+                      : '0 16px 48px rgba(0, 0, 0, 0.12), 0 0 60px rgba(59, 130, 246, 0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateZ(0)';
+                    e.currentTarget.style.boxShadow = dark
+                      ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(59, 130, 246, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+                      : '0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8)';
+                  }}
+                >
+                  <div style={{ width: '44px', height: '44px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', background: dark ? 'linear-gradient(145deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1))' : 'linear-gradient(145deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.08))', border: `1px solid ${glowBorder}` }}>
+                    <Icon size={18} style={{ color: dark ? '#60a5fa' : '#3b82f6' }} />
                   </div>
-                  <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px', color: text1 }}>{f.title}</h3>
-                  <p style={{ fontSize: '12px', lineHeight: 1.65, color: text2 }}>{f.desc}</p>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '10px', color: text1 }}>{f.title}</h3>
+                  <p style={{ fontSize: '13px', lineHeight: 1.7, color: text2 }}>{f.desc}</p>
                 </div>
               );
             })}
@@ -194,17 +297,32 @@ export function Landing({ onEnter, onViewDemo }: Props) {
       </section>
 
       {/* Pipeline */}
-      <section style={{ padding: '64px 24px', background: pipeBg }}>
+      <section style={{ padding: '72px 24px', background: pipeBg }}>
         <div style={{ maxWidth: '768px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#f0f0f0', marginBottom: '8px' }}>Analysis Pipeline</h2>
-            <p style={{ fontSize: '12px', color: '#888888' }}>10 computation stages. Complete transparency at every step.</p>
+          <div style={{ textAlign: 'center', marginBottom: '48px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 600, color: '#f0f0f0', marginBottom: '10px' }}>Analysis Pipeline</h2>
+            <p style={{ fontSize: '13px', color: '#888888' }}>10 computation stages. Complete transparency at every step.</p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
             {PIPELINE.map((stage, i) => (
-              <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '8px', padding: '10px 12px', border: `1px solid ${pipeCardBorder}`, background: pipeCardBg }}>
-                <span style={{ fontSize: '10px', fontWeight: 700, color: '#666666', minWidth: '20px' }}>{String(i + 1).padStart(2, '0')}</span>
-                <span style={{ fontSize: '11px', color: '#b0b0b0' }}>{stage}</span>
+              <div
+                key={stage}
+                style={pipelineCardStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-3px)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 6px 24px rgba(0, 0, 0, 0.4), 0 0 30px rgba(59, 130, 246, 0.1)'
+                    : '0 6px 24px rgba(0, 0, 0, 0.15), 0 0 30px rgba(59, 130, 246, 0.06)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateZ(0)';
+                  e.currentTarget.style.boxShadow = dark
+                    ? '0 2px 12px rgba(0, 0, 0, 0.3), 0 0 20px rgba(59, 130, 246, 0.05)'
+                    : '0 2px 12px rgba(0, 0, 0, 0.2), 0 0 20px rgba(59, 130, 246, 0.03)';
+                }}
+              >
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#666666', minWidth: '22px' }}>{String(i + 1).padStart(2, '0')}</span>
+                <span style={{ fontSize: '12px', color: '#b0b0b0' }}>{stage}</span>
               </div>
             ))}
           </div>

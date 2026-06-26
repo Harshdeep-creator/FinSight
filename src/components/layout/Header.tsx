@@ -1,10 +1,12 @@
-import { Settings, PanelRight, Sun, Moon, Home, BarChart3, MessageSquare } from 'lucide-react';
+import { Settings, PanelRight, Sun, Moon, Home, BarChart3, MessageSquare, LogOut } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../lib/auth';
 
 interface Props { onHome: () => void; }
 
 export function Header({ onHome }: Props) {
   const { state, dispatch, activeWorkspace } = useApp();
+  const { signOut, user } = useAuth();
 
   return (
     <header
@@ -34,6 +36,9 @@ export function Header({ onHome }: Props) {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1">
+        <span className="text-xs mr-2 hidden sm:block" style={{ color: 'var(--c-text-4)' }}>
+          {user?.email}
+        </span>
         <button onClick={() => dispatch({ type: 'TOGGLE_DARK_MODE' })} className="btn-ghost p-1.5" title={state.darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
           {state.darkMode ? <Sun size={15} /> : <Moon size={15} />}
         </button>
@@ -42,6 +47,9 @@ export function Header({ onHome }: Props) {
         </button>
         <button onClick={() => dispatch({ type: 'TOGGLE_RIGHT_PANEL' })} className={`btn-ghost p-1.5 ${state.rightPanelOpen ? 'opacity-100' : 'opacity-50'}`} title="Toggle Intelligence Panel">
           <PanelRight size={15} />
+        </button>
+        <button onClick={signOut} className="btn-ghost p-1.5" title="Sign out">
+          <LogOut size={15} />
         </button>
       </div>
     </header>
