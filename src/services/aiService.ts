@@ -33,30 +33,50 @@ ABSOLUTE RULES:
 6. Always explain the financial significance of findings — not just the numbers.
 7. Remember previous conversation turns and maintain context.`;
 
-const VISION_EXTRACT_PROMPT = `Analyze this image/document and extract financial data if present.
+const VISION_EXTRACT_PROMPT = `You are a financial document analyzer. Carefully analyze this image and extract ALL financial data.
 
-If the image does NOT contain financial content (like a random photo, meme, drawing, screenshot of a game, etc), return:
+STEP 1: Determine if this is a financial document
+Financial documents include: balance sheets, income statements, cash flow statements, financial reports, invoices, receipts with totals, transaction records, ledgers, expense reports, tax documents, investment statements, financial dashboards, spreadsheets with numbers.
+
+If this is NOT a financial document (random photo, meme, landscape, person, drawing, game screenshot, etc), return:
 {
   "is_financial": false,
   "reason": "brief explanation why this is not financial"
 }
 
-If the image DOES contain financial content (balance sheet, income statement, cash flow, financial report, transaction list, invoice, receipt with totals, etc), return:
+STEP 2: If this IS a financial document, extract ALL data
+Return this JSON structure:
 {
   "is_financial": true,
-  "document_type": "balance sheet|income statement|cash flow|invoice|receipt|transaction list|other",
-  "company_name": "company name if visible",
-  "period": "reporting period if visible",
-  "currency": "USD|GBP|EUR etc",
+  "document_type": "balance sheet|income statement|cash flow|invoice|receipt|transaction list|financial report|ledger|other",
+  "company_name": "company name if visible or 'Unknown'",
+  "period": "reporting period if visible (e.g., 'Q1 2024', 'FY 2023')",
+  "currency": "USD|GBP|EUR|INR|etc",
   "data": [
-    {"label": "item name", "value": 12345, "category": "asset|liability|equity|revenue|expense|other", "notes": "any notes"}
+    {"label": "exact item name from document", "value": numeric_value, "category": "asset|liability|equity|revenue|expense|cash|other", "notes": "any relevant notes"},
+    {"label": "another item", "value": number, "category": "...", "notes": "..."}
   ],
-  "summary": "brief description of the document"
+  "summary": "brief description of what financial information this document contains"
 }
 
-Extract ALL numbers visible. Use numeric values only (no currency symbols in value field). If a value is negative, use a negative number.
+CRITICAL EXTRACTION RULES:
+1. Extract EVERY SINGLE number you see - don't skip any rows
+2. Use the EXACT label as it appears in the document (e.g., "Total Assets", "Net Revenue", "Accounts Payable")
+3. For negative numbers (losses, expenses in brackets), use negative values
+4. If a number has commas (1,000), remove them and use just the number (1000)
+5. Categorize each item:
+   - asset: things owned (cash, inventory, property, equipment, receivables)
+   - liability: debts owed (payables, loans, accrued expenses)
+   - equity: owner's interest (capital, retained earnings, stock)
+   - revenue: income from operations (sales, service revenue, other income)
+   - expense: costs (COGS, salaries, rent, utilities, depreciation)
+   - cash: cash and cash equivalents
+   - other: if it doesn't fit above
+6. Include totals, subtotals, and line items
+7. If you see a table with multiple columns (current year, prior year), extract each column as separate items with year suffix (e.g., "Revenue 2024", "Revenue 2023")
+8. For percentage values, include them as items with category "other"
 
-Financial content includes: balance sheets, income statements, cash flow statements, invoices, receipts with financial totals, transaction records, financial reports, expense reports, tax documents, investment statements, financial dashboards.`;
+Be thorough and accurate. This data will be used for financial analysis.`;
 
 function buildAnalysisContext(analysis: AnalysisResult): string {
   const { health_score, metrics, key_findings, anomalies, raw_stats } = analysis;
@@ -184,7 +204,7 @@ async function extractWithGeminiVision(imageBase64: string, mimeType: string): P
             { inline_data: { mime_type: mimeType, data: imageBase64 } },
           ],
         }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       }),
     }
   );
@@ -208,7 +228,7 @@ async function extractWithGroqVision(imageBase64: string, mimeType: string): Pro
     body: JSON.stringify({
       model: 'meta-llama/llama-4-scout-17b-16e-instruct',
       temperature: 0.1,
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [{
         role: 'user',
         content: [
@@ -328,14 +348,14 @@ function generateFallbackResponse(question: string, mode: 'assistant' | 'analysi
     const { health_score, metrics, raw_stats } = analysis;
 
     if (lq.includes('revenue') || lq.includes('sales')) {
-      const m = metrics['net_revenue'] || metrics['gross_revenue'];
-      return `Based on the analysis of ${analysis.audit_trail.dataset_name}:\n\n**Net Revenue: ${m?.formatted_value || 'N/A'}**\n\n${m?.meaning || ''}\n\n${m?.evidence || ''}\n\nThe revenue growth rate (CMGR) stands at ${metrics['revenue_growth_rate']?.formatted_value || 'N/A'}, which is ${metrics['revenue_growth_rate']?.assessment_label || 'N/A'}.`;
+      const m = metrics['net_revenue'] || metrics['gross_revenue'] || metrics['total_revenue'] || metrics['total_value'];
+      return `Based on the analysis of ${analysis.audit_trail.dataset_name}:\n\n**${m?.label || 'Revenue'}: ${m?.formatted_value || 'N/A'}**\n\n${m?.meaning || ''}\n\n${m?.evidence || ''}`;
     }
     if (lq.includes('health') || lq.includes('score')) {
       return `**Financial Health Score: ${health_score.overall}/100 (${health_score.grade.toUpperCase()})**\n\n${health_score.summary}\n\n**Sub-scores:**\n- Profitability: ${health_score.profitability}/100\n- Growth: ${health_score.growth}/100\n- Liquidity: ${health_score.liquidity}/100\n- Cash Position: ${health_score.cash_position}/100\n- Risk Exposure: ${health_score.risk_exposure}/100`;
     }
     if (lq.includes('customer')) {
-      return `**Customer Analysis from ${analysis.audit_trail.dataset_name}:**\n\n- Unique Customers: ${raw_stats.unique_customers.toLocaleString()}\n- Average Order Value: £${raw_stats.avg_order_value}\n- ${metrics['customer_concentration_ratio']?.label}: ${metrics['customer_concentration_ratio']?.formatted_value} (${metrics['customer_concentration_ratio']?.assessment_label})`;
+      return `**Customer Analysis from ${analysis.audit_trail.dataset_name}:**\n\n- Unique Customers: ${raw_stats.unique_customers.toLocaleString()}\n- Average Order Value: £${raw_stats.avg_order_value}\n- ${metrics['customer_concentration_ratio']?.label || 'Concentration'}: ${metrics['customer_concentration_ratio']?.formatted_value || 'N/A'} (${metrics['customer_concentration_ratio']?.assessment_label || 'N/A'})`;
     }
     return `Based on the analysis of **${analysis.audit_trail.dataset_name}** (${raw_stats.total_transactions.toLocaleString()} records):\n\n**Health Score:** ${health_score.overall}/100 — ${health_score.summary}\n\n**Available metrics:** ${Object.keys(metrics).join(', ')}`;
   }

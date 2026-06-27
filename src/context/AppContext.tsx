@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useCallback, useRef } from 'react';
 import type { Workspace, Message, AnalysisResult, ProcessingState, AppMode } from '../types';
 import { supabase } from '../lib/supabase';
 import { DEMO_ANALYSIS_RESULT, DEMO_WORKSPACE_ID, DEMO_WORKSPACE_NAME } from '../data/demoData';
@@ -23,6 +23,7 @@ interface AppState {
   groqKey: string;
   userGeminiKey: string;
   userGroqKey: string;
+  initialized: boolean;
 }
 
 type AppAction =
@@ -41,7 +42,8 @@ type AppAction =
   | { type: 'TOGGLE_RIGHT_PANEL' }
   | { type: 'TOGGLE_SETTINGS' }
   | { type: 'TOGGLE_DARK_MODE' }
-  | { type: 'SET_USER_KEYS'; payload: { geminiKey: string; groqKey: string } };
+  | { type: 'SET_USER_KEYS'; payload: { geminiKey: string; groqKey: string } }
+  | { type: 'SET_INITIALIZED'; payload: boolean };
 
 const DEMO_WORKSPACE: Workspace = {
   id: DEMO_WORKSPACE_ID,
@@ -54,6 +56,11 @@ const DEMO_WORKSPACE: Workspace = {
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
+
+function getInitialDarkMode(): boolean {
+  const stored = localStorage.getItem('finsight_dark_mode');
+  return stored ? stored === 'true' : true;
+}
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -71,12 +78,16 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_LOADING': return { ...state, loading: action.payload };
     case 'TOGGLE_RIGHT_PANEL': return { ...state, rightPanelOpen: !state.rightPanelOpen };
     case 'TOGGLE_SETTINGS': return { ...state, settingsOpen: !state.settingsOpen };
-    case 'TOGGLE_DARK_MODE': return { ...state, darkMode: !state.darkMode };
+    case 'TOGGLE_DARK_MODE': {
+      localStorage.setItem('finsight_dark_mode', (!state.darkMode).toString());
+      return { ...state, darkMode: !state.darkMode };
+    }
     case 'SET_USER_KEYS': {
       const gemini = action.payload.geminiKey || DEFAULT_GEMINI_KEY;
       const groq   = action.payload.groqKey   || DEFAULT_GROQ_KEY;
       return { ...state, userGeminiKey: action.payload.geminiKey, userGroqKey: action.payload.groqKey, geminiKey: gemini, groqKey: groq };
     }
+    case 'SET_INITIALIZED': return { ...state, initialized: action.payload };
     default: return state;
   }
 }
@@ -85,17 +96,18 @@ const initialState: AppState = {
   mode: 'assistant',
   workspaces: [],
   activeWorkspaceId: null,
-  messages: {},
+  messages: { [DEMO_WORKSPACE_ID]: [] },
   analysisResults: { [DEMO_WORKSPACE_ID]: DEMO_ANALYSIS_RESULT },
   processingState: { stage: 'idle', progress: 0, message: '' },
   loading: true,
   rightPanelOpen: true,
   settingsOpen: false,
-  darkMode: true,
+  darkMode: getInitialDarkMode(),
   geminiKey: DEFAULT_GEMINI_KEY,
   groqKey:   DEFAULT_GROQ_KEY,
   userGeminiKey: '',
   userGroqKey:   '',
+  initialized: false,
 };
 
 interface AppContextValue {
@@ -107,8 +119,8 @@ interface AppContextValue {
   createWorkspace: (name: string, mode: AppMode) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
-  loadMessages: (workspaceId: string) => Promise<void>;
-  loadAnalysis: (workspaceId: string) => Promise<void>;
+  loadMessages: (workspaceId: string, force?: boolean) => Promise<void>;
+  loadAnalysis: (workspaceId: string, force?: boolean) => Promise<void>;
   sendMessage: (workspaceId: string, content: string, role?: 'user' | 'assistant') => Promise<Message>;
   setActiveWorkspace: (id: string) => void;
   setAnalysisResult: (workspaceId: string, result: AnalysisResult) => Promise<void>;
@@ -119,6 +131,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const { userId, lastWorkspaceId, setLastWorkspaceId } = useAuth();
   const [state, dispatch] = useReducer(reducer, initialState);
+  const loadedWorkspacesRef = useRef<Set<string>>(new Set());
 
   const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId) || null;
   const activeMessages  = state.activeWorkspaceId ? (state.messages[state.activeWorkspaceId] || []) : [];
@@ -141,37 +154,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const load = async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('workspaces')
           .select('*')
           .eq('user_id', userId)
           .order('updated_at', { ascending: false });
-        dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE, ...(data || [])] });
 
-        // Restore last active workspace if we have workspaces
+        if (error) throw error;
+
         const allWorkspaces = [DEMO_WORKSPACE, ...(data || [])];
+        dispatch({ type: 'SET_WORKSPACES', payload: allWorkspaces });
+
+        // Restore last active workspace
         if (lastWorkspaceId && allWorkspaces.some(w => w.id === lastWorkspaceId)) {
           dispatch({ type: 'SET_ACTIVE_WORKSPACE', payload: lastWorkspaceId });
-          // Set mode based on workspace
           const ws = allWorkspaces.find(w => w.id === lastWorkspaceId);
           if (ws) dispatch({ type: 'SET_MODE', payload: ws.mode as AppMode });
         }
-      } catch {
+      } catch (err) {
+        console.error('Failed to load workspaces:', err);
         dispatch({ type: 'SET_WORKSPACES', payload: [DEMO_WORKSPACE] });
       }
       dispatch({ type: 'SET_LOADING', payload: false });
+      dispatch({ type: 'SET_INITIALIZED', payload: true });
     };
     load();
   }, [userId]);
 
   // Load messages and analysis when active workspace changes
   useEffect(() => {
-    if (state.activeWorkspaceId && userId) {
+    if (state.activeWorkspaceId && state.initialized) {
       loadMessages(state.activeWorkspaceId);
       loadAnalysis(state.activeWorkspaceId);
       setLastWorkspaceId(state.activeWorkspaceId);
     }
-  }, [state.activeWorkspaceId]);
+  }, [state.activeWorkspaceId, state.initialized]);
 
   const createWorkspace = useCallback(async (name: string, mode: AppMode): Promise<Workspace> => {
     if (!userId) throw new Error('User not initialized');
@@ -181,8 +198,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
       dispatch({ type: 'ADD_WORKSPACE', payload: data });
       return data;
-    } catch {
-      const fallback: Workspace = { ...ws, id: `local-${Date.now()}`, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    } catch (err) {
+      console.error('Failed to create workspace:', err);
+      const fallback: Workspace = { ...ws, id: `local-${crypto.randomUUID()}`, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       dispatch({ type: 'ADD_WORKSPACE', payload: fallback });
       return fallback;
     }
@@ -198,7 +216,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await supabase.from('workspaces').delete().eq('id', id);
       await supabase.from('messages').delete().eq('workspace_id', id);
       await supabase.from('analysis_results').delete().eq('workspace_id', id);
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Failed to delete workspace:', err);
+    }
   }, [state.activeWorkspaceId, setLastWorkspaceId]);
 
   const renameWorkspace = useCallback(async (id: string, name: string) => {
@@ -207,41 +227,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!ws) return;
     const updated = { ...ws, name, updated_at: new Date().toISOString() };
     dispatch({ type: 'UPDATE_WORKSPACE', payload: updated });
-    try { await supabase.from('workspaces').update({ name }).eq('id', id); } catch { /* */ }
+    try {
+      await supabase.from('workspaces').update({ name }).eq('id', id);
+    } catch (err) {
+      console.error('Failed to rename workspace:', err);
+    }
   }, [state.workspaces]);
 
-  const loadMessages = useCallback(async (workspaceId: string) => {
-    // Skip if already loaded or demo workspace
+  const loadMessages = useCallback(async (workspaceId: string, force = false) => {
     if (workspaceId === DEMO_WORKSPACE_ID) return;
-    if (!userId) return;
+    if (!force && loadedWorkspacesRef.current.has(workspaceId)) return;
+    loadedWorkspacesRef.current.add(workspaceId);
 
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('user_id', userId)
         .order('created_at', { ascending: true });
+
+      if (error) throw error;
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: data || [] } });
-    } catch {
+    } catch (err) {
+      console.error('Failed to load messages:', err);
       dispatch({ type: 'SET_MESSAGES', payload: { workspaceId, messages: [] } });
     }
-  }, [userId]);
+  }, []);
 
-  const loadAnalysis = useCallback(async (workspaceId: string) => {
+  const loadAnalysis = useCallback(async (workspaceId: string, force = false) => {
     if (workspaceId === DEMO_WORKSPACE_ID) return;
-    if (!userId) return;
+    if (!force && state.analysisResults[workspaceId]) return;
 
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('analysis_results')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
+      if (error) throw error;
       if (data) {
         const result: AnalysisResult = {
           id: data.id,
@@ -259,10 +285,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
         dispatch({ type: 'SET_ANALYSIS_RESULT', payload: { workspaceId, result } });
       }
-    } catch {
-      // No analysis found
+    } catch (err) {
+      console.error('Failed to load analysis:', err);
     }
-  }, [userId]);
+  }, [state.analysisResults]);
 
   const sendMessage = useCallback(async (workspaceId: string, content: string, role: 'user' | 'assistant' = 'user'): Promise<Message> => {
     if (!userId) throw new Error('User not initialized');
@@ -270,13 +296,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const optimisticId = `opt-${Date.now()}`;
     const optimistic: Message = { ...msg, id: optimisticId, created_at: new Date().toISOString() };
     dispatch({ type: 'ADD_MESSAGE', payload: { workspaceId, message: optimistic } });
+
     try {
-      const { data } = await supabase.from('messages').insert(msg).select().single();
+      const { data, error } = await supabase.from('messages').insert(msg).select().single();
+      if (error) throw error;
       if (data) {
         dispatch({ type: 'UPDATE_MESSAGE', payload: { workspaceId, messageId: optimisticId, message: data } });
         return data;
       }
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Failed to save message:', err);
+    }
     return optimistic;
   }, [userId]);
 
@@ -322,7 +352,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             report_summary: result.report_summary,
             raw_stats: result.raw_stats,
           });
-        } catch { /* */ }
+        } catch (err) {
+          console.error('Failed to save analysis:', err);
+        }
       }
     }
   }, [state.workspaces, userId]);

@@ -89,8 +89,9 @@ function runFinancialStatementAnalysis(
 
   for (const row of rows) {
     const label = String(row['item'] || row['label'] || row['Item'] || row['Description'] || 'Unknown');
-    const value = Number(row['value'] || row['Value'] || row['amount'] || row['Amount'] || 0);
-    const category = String(row['category'] || row['Category'] || 'other');
+    const rawValue = row['value'] ?? row['Value'] ?? row['amount'] ?? row['Amount'] ?? 0;
+    const value = typeof rawValue === 'string' ? parseFloat(rawValue.replace(/[^0-9.\-]/g, '')) : Number(rawValue);
+    const category = String(row['category'] || row['Category'] || 'other').toLowerCase();
 
     if (value && !isNaN(value)) {
       totalValue += Math.abs(value);
@@ -101,25 +102,39 @@ function runFinancialStatementAnalysis(
   // Group by category
   const categoryTotals: Record<string, number> = {};
   for (const item of items) {
-    const cat = item.category.toLowerCase();
-    categoryTotals[cat] = (categoryTotals[cat] || 0) + Math.abs(item.value);
+    categoryTotals[item.category] = (categoryTotals[item.category] || 0) + Math.abs(item.value);
   }
 
-  // Calculate health score based on extracted data
-  const assets = categoryTotals['asset'] || totalValue * 0.4;
-  const liabilities = categoryTotals['liability'] || totalValue * 0.2;
-  const revenue = categoryTotals['revenue'] || totalValue * 0.3;
-  const expenses = categoryTotals['expense'] || totalValue * 0.1;
+  // Get key financial figures
+  const assets = categoryTotals['asset'] || 0;
+  const liabilities = categoryTotals['liability'] || 0;
+  const equity = categoryTotals['equity'] || 0;
+  const revenue = categoryTotals['revenue'] || 0;
+  const expenses = categoryTotals['expense'] || 0;
+  const cash = categoryTotals['cash'] || 0;
 
+  // Calculate key ratios
+  const currentRatio = liabilities > 0 ? assets / liabilities : assets > 0 ? 99 : 0;
+  const debtToEquity = equity > 0 ? liabilities / equity : 0;
+  const profitMargin = revenue > 0 ? ((revenue - expenses) / revenue) * 100 : 0;
+  const netIncome = revenue - expenses;
+
+  // Calculate health score based on extracted data
   const healthScore: HealthScore = {
-    overall: Math.round(50 + Math.min(30, (assets / (liabilities || 1)) * 10)),
-    profitability: Math.round(revenue > expenses ? 75 : 50),
-    liquidity: Math.round(assets / (liabilities || 1) > 1.5 ? 80 : 60),
+    overall: Math.min(100, Math.max(0, Math.round(
+      (currentRatio > 1.5 ? 25 : currentRatio > 1 ? 20 : 10) +
+      (profitMargin > 20 ? 25 : profitMargin > 10 ? 20 : profitMargin > 0 ? 15 : 5) +
+      (debtToEquity < 0.5 ? 20 : debtToEquity < 1 ? 15 : debtToEquity < 2 ? 10 : 5) +
+      (cash > 0 ? 15 : 5) +
+      (equity > 0 ? 15 : 5)
+    ))),
+    profitability: Math.min(100, Math.max(0, Math.round(50 + profitMargin))),
+    liquidity: Math.min(100, Math.max(0, Math.round(currentRatio * 30))),
     growth: 65,
-    cash_position: 70,
-    risk_exposure: Math.round(100 - (liabilities / (assets || 1)) * 50),
+    cash_position: Math.min(100, Math.max(0, Math.round(cash > totalValue * 0.1 ? 80 : 50))),
+    risk_exposure: Math.min(100, Math.max(0, Math.round(100 - debtToEquity * 30))),
     grade: 'good',
-    summary: `Financial statement analyzed with ${items.length} line items totaling ${fmtCurrency(totalValue)}. Key ratios calculated from extracted data.`,
+    summary: `Financial statement analyzed with ${items.length} line items. ${assets > 0 ? `Assets: ${fmtCurrency(assets)}. ` : ''}${revenue > 0 ? `Revenue: ${fmtCurrency(revenue)}. ` : ''}${netIncome !== 0 ? `Net ${netIncome > 0 ? 'Income' : 'Loss'}: ${fmtCurrency(Math.abs(netIncome))}.` : ''}`,
   };
 
   // Build metrics from extracted items
@@ -138,118 +153,224 @@ function runFinancialStatementAnalysis(
       calculation_path: 'Count of items with numeric values',
       confidence: 85,
     },
-    total_value: {
-      key: 'total_value',
-      label: 'Total Value (Abs)',
-      value: totalValue,
-      formatted_value: fmtCurrency(totalValue),
-      unit: 'currency',
-      meaning: 'Sum of absolute values across all extracted line items.',
-      assessment: 'neutral',
-      assessment_label: 'Calculated',
-      evidence: `Sum of |value| across ${items.length} items.`,
-      suggested_action: 'Compare to document totals for validation.',
-      calculation_path: 'Sum of absolute values',
-      confidence: 80,
-    },
   };
 
-  // Add category-specific metrics if available
-  if (categoryTotals['asset']) {
+  // Add extracted metrics
+  if (assets > 0) {
     metrics['total_assets'] = {
       key: 'total_assets',
       label: 'Total Assets',
-      value: categoryTotals['asset'],
-      formatted_value: fmtCurrency(categoryTotals['asset']),
+      value: assets,
+      formatted_value: fmtCurrency(assets),
       unit: 'currency',
-      meaning: 'Sum of all asset items extracted from the document.',
+      meaning: 'Sum of all asset items including current assets, fixed assets, and other assets.',
       assessment: 'positive',
       assessment_label: 'Extracted',
-      evidence: 'Sum of items in asset category.',
-      suggested_action: 'Compare to balance sheet totals.',
+      evidence: 'Sum of items categorized as assets from the document.',
+      suggested_action: 'Compare to balance sheet totals for validation.',
       calculation_path: 'Sum of asset category values',
       confidence: 80,
     };
   }
 
-  if (categoryTotals['liability']) {
+  if (liabilities > 0) {
     metrics['total_liabilities'] = {
       key: 'total_liabilities',
       label: 'Total Liabilities',
-      value: categoryTotals['liability'],
-      formatted_value: fmtCurrency(categoryTotals['liability']),
+      value: liabilities,
+      formatted_value: fmtCurrency(liabilities),
       unit: 'currency',
-      meaning: 'Sum of all liability items extracted from the document.',
-      assessment: 'neutral',
-      assessment_label: 'Extracted',
-      evidence: 'Sum of items in liability category.',
-      suggested_action: 'Compare to balance sheet totals.',
+      meaning: 'Sum of all liability items including current and long-term liabilities.',
+      assessment: liabilities > assets ? 'warning' : 'neutral',
+      assessment_label: liabilities > assets ? 'High' : 'Extracted',
+      evidence: 'Sum of items categorized as liabilities from the document.',
+      suggested_action: 'Compare to balance sheet totals for validation.',
       calculation_path: 'Sum of liability category values',
       confidence: 80,
     };
   }
 
-  if (categoryTotals['revenue']) {
+  if (equity > 0) {
+    metrics['total_equity'] = {
+      key: 'total_equity',
+      label: "Shareholders' Equity",
+      value: equity,
+      formatted_value: fmtCurrency(equity),
+      unit: 'currency',
+      meaning: "Total shareholders' equity representing the residual interest in assets after deducting liabilities.",
+      assessment: equity > liabilities ? 'positive' : 'neutral',
+      assessment_label: 'Extracted',
+      evidence: 'Sum of items categorized as equity from the document.',
+      suggested_action: 'Compare to balance sheet totals for validation.',
+      calculation_path: 'Sum of equity category values',
+      confidence: 80,
+    };
+  }
+
+  if (revenue > 0) {
     metrics['total_revenue'] = {
       key: 'total_revenue',
       label: 'Total Revenue',
-      value: categoryTotals['revenue'],
-      formatted_value: fmtCurrency(categoryTotals['revenue']),
+      value: revenue,
+      formatted_value: fmtCurrency(revenue),
       unit: 'currency',
-      meaning: 'Sum of all revenue items extracted from the document.',
+      meaning: 'Total revenue or sales generated by the business.',
       assessment: 'positive',
       assessment_label: 'Extracted',
-      evidence: 'Sum of items in revenue category.',
-      suggested_action: 'Compare to income statement totals.',
+      evidence: 'Sum of items categorized as revenue from the document.',
+      suggested_action: 'Compare to income statement totals for validation.',
       calculation_path: 'Sum of revenue category values',
       confidence: 80,
     };
   }
 
+  if (expenses > 0) {
+    metrics['total_expenses'] = {
+      key: 'total_expenses',
+      label: 'Total Expenses',
+      value: expenses,
+      formatted_value: fmtCurrency(expenses),
+      unit: 'currency',
+      meaning: 'Total operating expenses and costs.',
+      assessment: 'neutral',
+      assessment_label: 'Extracted',
+      evidence: 'Sum of items categorized as expenses from the document.',
+      suggested_action: 'Compare to income statement totals for validation.',
+      calculation_path: 'Sum of expense category values',
+      confidence: 80,
+    };
+  }
+
+  if (netIncome !== 0) {
+    metrics['net_income'] = {
+      key: 'net_income',
+      label: 'Net Income',
+      value: netIncome,
+      formatted_value: fmtCurrency(Math.abs(netIncome)),
+      unit: 'currency',
+      meaning: netIncome > 0 ? 'Net profit after all expenses.' : 'Net loss for the period.',
+      assessment: netIncome > 0 ? 'positive' : 'negative',
+      assessment_label: netIncome > 0 ? 'Profitable' : 'Loss',
+      evidence: 'Calculated as Revenue minus Expenses.',
+      suggested_action: 'Analyze profitability trends over time.',
+      calculation_path: 'Net Income = Revenue - Expenses',
+      confidence: 75,
+    };
+  }
+
+  if (currentRatio > 0) {
+    metrics['current_ratio'] = {
+      key: 'current_ratio',
+      label: 'Asset-to-Liability Ratio',
+      value: currentRatio,
+      formatted_value: currentRatio.toFixed(2),
+      unit: 'ratio',
+      meaning: `Ratio of assets to liabilities. A ratio above 1 indicates assets exceed liabilities.`,
+      assessment: currentRatio > 2 ? 'positive' : currentRatio > 1 ? 'neutral' : 'negative',
+      assessment_label: currentRatio > 2 ? 'Strong' : currentRatio > 1 ? 'Adequate' : 'Concern',
+      evidence: `Assets (${fmtCurrency(assets)}) / Liabilities (${fmtCurrency(liabilities)})`,
+      suggested_action: currentRatio < 1 ? 'Investigate liquidity and reduce liabilities.' : 'Maintain healthy ratio.',
+      calculation_path: 'Current Ratio = Total Assets / Total Liabilities',
+      confidence: 75,
+    };
+  }
+
+  if (profitMargin !== 0 && revenue > 0) {
+    metrics['profit_margin'] = {
+      key: 'profit_margin',
+      label: 'Profit Margin',
+      value: profitMargin,
+      formatted_value: fmtPct(profitMargin),
+      unit: '%',
+      meaning: `Percentage of revenue retained as profit after expenses.`,
+      assessment: profitMargin > 20 ? 'positive' : profitMargin > 10 ? 'neutral' : 'negative',
+      assessment_label: profitMargin > 20 ? 'Healthy' : profitMargin > 10 ? 'Moderate' : 'Low',
+      evidence: `(${fmtCurrency(revenue)} - ${fmtCurrency(expenses)}) / ${fmtCurrency(revenue)}`,
+      suggested_action: profitMargin < 10 ? 'Focus on reducing costs or increasing prices.' : 'Maintain efficiency.',
+      calculation_path: 'Profit Margin = (Revenue - Expenses) / Revenue × 100',
+      confidence: 75,
+    };
+  }
+
   // Key findings
-  const keyFindings: KeyFinding[] = [
-    {
+  const keyFindings: KeyFinding[] = [];
+
+  if (items.length > 0) {
+    keyFindings.push({
       id: 'kf-1',
       type: 'insight',
-      title: `Financial Statement with ${items.length} Line Items`,
-      description: `Successfully extracted ${items.length} financial line items from the uploaded document, representing a total absolute value of ${fmtCurrency(totalValue)}.`,
-      evidence: `Extracted items span ${Object.keys(categoryTotals).length} categories: ${Object.keys(categoryTotals).join(', ')}.`,
+      title: `Financial Document Analyzed`,
+      description: `Successfully extracted ${items.length} financial line items from the uploaded document across ${Object.keys(categoryTotals).length} categories: ${Object.keys(categoryTotals).join(', ')}.`,
+      evidence: `${items.length} items extracted with total absolute value of ${fmtCurrency(totalValue)}.`,
       impact: 'medium',
-      metric_references: ['total_items', 'total_value'],
-    },
-  ];
-
-  if (categoryTotals['asset'] && categoryTotals['liability']) {
-    const ratio = categoryTotals['asset'] / categoryTotals['liability'];
-    keyFindings.push({
-      id: 'kf-2',
-      type: ratio > 2 ? 'opportunity' : ratio > 1 ? 'insight' : 'risk',
-      title: `Asset-to-Liability Ratio: ${ratio.toFixed(2)}`,
-      description: `Assets of ${fmtCurrency(categoryTotals['asset'])} against liabilities of ${fmtCurrency(categoryTotals['liability'])} yield a ratio of ${ratio.toFixed(2)}. ${ratio > 2 ? 'Strong financial position.' : ratio > 1 ? 'Adequate coverage.' : 'Potential liquidity concern.'}`,
-      evidence: `Ratio = Total Assets / Total Liabilities = ${categoryTotals['asset']} / ${categoryTotals['liability']}`,
-      impact: 'high',
-      metric_references: ['total_assets', 'total_liabilities'],
+      metric_references: ['total_items'],
     });
   }
 
-  // Anomalies - check for unusual items
+  if (assets > 0 && liabilities > 0) {
+    keyFindings.push({
+      id: 'kf-2',
+      type: currentRatio > 1.5 ? 'opportunity' : currentRatio > 1 ? 'insight' : 'risk',
+      title: `Asset-Liability Ratio: ${currentRatio.toFixed(2)}`,
+      description: currentRatio > 1.5
+        ? `Strong financial position with assets (${fmtCurrency(assets)}) significantly exceeding liabilities (${fmtCurrency(liabilities)}). The business has healthy liquidity.`
+        : currentRatio > 1
+          ? `Adequate coverage with assets covering liabilities by a factor of ${currentRatio.toFixed(2)}.`
+          : `Potential liquidity concern: liabilities (${fmtCurrency(liabilities)}) exceed assets (${fmtCurrency(assets)}).`,
+      evidence: `Ratio = ${fmtCurrency(assets)} / ${fmtCurrency(liabilities)} = ${currentRatio.toFixed(2)}`,
+      impact: 'high',
+      metric_references: ['total_assets', 'total_liabilities', 'current_ratio'],
+    });
+  }
+
+  if (revenue > 0 && expenses > 0) {
+    keyFindings.push({
+      id: 'kf-3',
+      type: netIncome > 0 ? 'opportunity' : 'risk',
+      title: `${netIncome >= 0 ? 'Net Profit' : 'Net Loss'}: ${fmtCurrency(Math.abs(netIncome))}`,
+      description: netIncome > 0
+        ? `The business generated a net profit of ${fmtCurrency(netIncome)} with a profit margin of ${profitMargin.toFixed(1)}%.`
+        : `The business incurred a net loss of ${fmtCurrency(Math.abs(netIncome))}. Expenses exceeded revenue.`,
+      evidence: `Revenue (${fmtCurrency(revenue)}) - Expenses (${fmtCurrency(expenses)}) = ${fmtCurrency(netIncome)}`,
+      impact: 'high',
+      metric_references: ['total_revenue', 'total_expenses', 'net_income', 'profit_margin'],
+    });
+  }
+
+  if (debtToEquity > 0 && equity > 0) {
+    keyFindings.push({
+      id: 'kf-4',
+      type: debtToEquity < 1 ? 'opportunity' : debtToEquity < 2 ? 'insight' : 'risk',
+      title: `Debt-to-Equity Ratio: ${debtToEquity.toFixed(2)}`,
+      description: debtToEquity < 1
+        ? `Conservative capital structure with low leverage. Liabilities are well-covered by equity.`
+        : debtToEquity < 2
+          ? `Moderate leverage. The business uses debt financing but remains within typical bounds.`
+          : `High leverage: liabilities are ${debtToEquity.toFixed(1)}x equity. Monitor debt servicing capacity.`,
+      evidence: `Total Liabilities (${fmtCurrency(liabilities)}) / Equity (${fmtCurrency(equity)}) = ${debtToEquity.toFixed(2)}`,
+      impact: 'medium',
+      metric_references: ['total_liabilities', 'total_equity'],
+    });
+  }
+
+  // Anomalies - significant items
   const anomalies: Anomaly[] = [];
-  const largeItems = items.filter(i => Math.abs(i.value) > totalValue * 0.3);
+  const largeItems = items.filter(i => Math.abs(i.value) > totalValue * 0.2);
   if (largeItems.length > 0) {
     anomalies.push({
-      id: 'a-large-item',
+      id: 'a-large-items',
       field: 'Value',
-      description: `${largeItems.length} line item(s) represent more than 30% of total value`,
-      severity: 'medium',
+      description: `${largeItems.length} line item(s) represent more than 20% of total value each`,
+      severity: 'low',
       evidence: `Items: ${largeItems.map(i => `${i.label} (${fmtCurrency(i.value)})`).join(', ')}`,
-      impact: 'Single items have significant impact on totals',
-      investigation_recommendation: 'Verify these items against source document for accuracy.',
+      impact: 'Large individual items have significant impact on totals',
+      investigation_recommendation: 'Verify these items against source document for accuracy and completeness.',
     });
   }
 
   // Raw stats
   const rawStats: RawStats = {
-    total_revenue: Math.round(categoryTotals['revenue'] || totalValue),
+    total_revenue: Math.round(revenue || totalValue),
     total_transactions: items.length,
     unique_customers: 1,
     unique_products: items.length,
@@ -257,7 +378,7 @@ function runFinancialStatementAnalysis(
     countries: ['Extracted'],
     top_products: items.slice(0, 5).map(i => ({ name: i.label, revenue: Math.abs(i.value), quantity: 1 })),
     top_customers: [{ id: 'doc-1', revenue: totalValue, orders: 1 }],
-    monthly_revenue: [{ period: 'Current', revenue: totalValue, transactions: items.length }],
+    monthly_revenue: [{ period: 'Document', revenue: revenue || totalValue, transactions: items.length }],
     returns_count: 0,
     returns_value: 0,
     avg_order_value: totalValue,
@@ -271,9 +392,27 @@ function runFinancialStatementAnalysis(
     valid_records: items.length,
     data_quality_score: 85,
     steps: auditSteps,
-    conclusion: `Financial statement analysis completed. Extracted ${items.length} line items with total value of ${fmtCurrency(totalValue)}. Key categories: ${Object.keys(categoryTotals).join(', ')}.`,
+    conclusion: `Financial statement analysis completed. Extracted ${items.length} line items. ${assets > 0 ? `Assets: ${fmtCurrency(assets)}. ` : ''}${liabilities > 0 ? `Liabilities: ${fmtCurrency(liabilities)}. ` : ''}${revenue > 0 ? `Revenue: ${fmtCurrency(revenue)}. ` : ''}${netIncome !== 0 ? `Net ${netIncome > 0 ? 'Income' : 'Loss'}: ${fmtCurrency(Math.abs(netIncome))}.` : ''}`,
     generated_at: new Date().toISOString(),
   };
+
+  const report = `# FinSight Analysis — ${datasetName}
+
+## Document Summary
+**Items Extracted:** ${items.length}
+**Total Absolute Value:** ${fmtCurrency(totalValue)}
+
+## Financial Position
+${assets > 0 ? `**Total Assets:** ${fmtCurrency(assets)}\n` : ''}${liabilities > 0 ? `**Total Liabilities:** ${fmtCurrency(liabilities)}\n` : ''}${equity > 0 ? `**Shareholders' Equity:** ${fmtCurrency(equity)}\n` : ''}${currentRatio > 0 ? `**Asset-Liability Ratio:** ${currentRatio.toFixed(2)}\n` : ''}
+
+## Profitability
+${revenue > 0 ? `**Revenue:** ${fmtCurrency(revenue)}\n` : ''}${expenses > 0 ? `**Expenses:** ${fmtCurrency(expenses)}\n` : ''}${netIncome !== 0 ? `**Net ${netIncome > 0 ? 'Income' : 'Loss'}:** ${fmtCurrency(Math.abs(netIncome))}\n` : ''}${profitMargin !== 0 ? `**Profit Margin:** ${profitMargin.toFixed(1)}%\n` : ''}
+
+## Extracted Categories
+${Object.entries(categoryTotals).map(([k, v]) => `- **${k.charAt(0).toUpperCase() + k.slice(1)}:** ${fmtCurrency(v)}`).join('\n')}
+
+---
+*Analysis based on AI-driven extraction from image/PDF. Verify against source document.*`;
 
   return {
     id: analysisId,
@@ -285,7 +424,7 @@ function runFinancialStatementAnalysis(
     forecasts: {},
     anomalies,
     audit_trail: auditTrail,
-    report_summary: `# FinSight Analysis — ${datasetName}\n\n**Items Extracted:** ${items.length}\n**Total Value:** ${fmtCurrency(totalValue)}\n\n## Categories\n${Object.entries(categoryTotals).map(([k, v]) => `- **${k}:** ${fmtCurrency(v)}`).join('\n')}\n\n---\n*Analysis based on AI-driven extraction from image/PDF. Verify against source document.*`,
+    report_summary: report,
     raw_stats: rawStats,
     created_at: new Date().toISOString(),
   };

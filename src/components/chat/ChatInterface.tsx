@@ -89,11 +89,12 @@ const ASSISTANT_STARTERS = [
 ];
 
 export function ChatInterface() {
-  const { state, activeWorkspace, activeMessages, activeAnalysis, sendMessage, loadMessages } = useApp();
+  const { state, activeWorkspace, activeMessages, activeAnalysis, sendMessage, loadMessages, renameWorkspace } = useApp();
   const [input, setInput] = useState('');
   const [responding, setResponding] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasRenamedRef = useRef(false);
 
   const mode = state.mode;
   const isAnalysisMode = mode === 'analysis';
@@ -101,12 +102,31 @@ export function ChatInterface() {
   const messages = activeMessages;
 
   useEffect(() => {
-    if (activeWorkspace?.id) loadMessages(activeWorkspace.id);
+    if (activeWorkspace?.id) {
+      loadMessages(activeWorkspace.id, true);
+      hasRenamedRef.current = false;
+    }
   }, [activeWorkspace?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, responding]);
+
+  // Auto-rename workspace based on first message
+  useEffect(() => {
+    if (
+      activeWorkspace?.id &&
+      !activeWorkspace.is_demo &&
+      !hasRenamedRef.current &&
+      messages.length >= 2 &&
+      messages[0].role === 'user'
+    ) {
+      hasRenamedRef.current = true;
+      const firstUserMessage = messages.find(m => m.role === 'user')?.content || '';
+      const newName = generateWorkspaceName(firstUserMessage, isAnalysisMode);
+      renameWorkspace(activeWorkspace.id, newName);
+    }
+  }, [messages.length, activeWorkspace, isAnalysisMode, renameWorkspace]);
 
   const adjustTextarea = useCallback(() => {
     const el = textareaRef.current;
@@ -244,4 +264,34 @@ export function ChatInterface() {
       </div>
     </div>
   );
+}
+
+function generateWorkspaceName(firstMessage: string, isAnalysis: boolean): string {
+  const maxLength = 40;
+  let name = firstMessage.trim();
+
+  // Extract key topic
+  if (isAnalysis) {
+    const keywords = ['analyze', 'analysis', 'report', 'data', 'financial', 'balance', 'income', 'cash', 'revenue', 'expense', 'profit', 'loss'];
+    const foundKeyword = keywords.find(k => name.toLowerCase().includes(k));
+    if (foundKeyword) {
+      name = foundKeyword.charAt(0).toUpperCase() + foundKeyword.slice(1) + ' Analysis';
+    } else if (name.length > maxLength) {
+      name = name.slice(0, maxLength - 3) + '...';
+    }
+  } else {
+    // For assistant chats, shorten and capitalize
+    if (name.length > maxLength) {
+      // Try to end at a word boundary
+      const truncated = name.slice(0, maxLength);
+      const lastSpace = truncated.lastIndexOf(' ');
+      if (lastSpace > maxLength * 0.6) {
+        name = truncated.slice(0, lastSpace) + '...';
+      } else {
+        name = truncated + '...';
+      }
+    }
+  }
+
+  return name || (isAnalysis ? 'New Analysis' : 'New Conversation');
 }
